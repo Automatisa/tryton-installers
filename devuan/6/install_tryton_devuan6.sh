@@ -159,12 +159,12 @@ echo ""
 pass_bd="${pass_bd#"${pass_bd%%[![:space:]]*}"}"
 pass_bd="${pass_bd%"${pass_bd##*[![:space:]]}"}"
 
-read -rp "Desea instalar todos los modulos (Y/n): " confirmar_modulos
+read -rp "Desea descargar todos los modulos (Y/n): " confirmar_modulos
 confirmar_modulos=${confirmar_modulos,,}
 [ -z "$confirmar_modulos" ] && confirmar_modulos="y"
 
 while [[ "$confirmar_modulos" != "y" && "$confirmar_modulos" != "n" ]]; do
-    read -rp "Desea instalar todos los modulos (Y/n): " confirmar_modulos
+    read -rp "Desea descargar todos los modulos (Y/n): " confirmar_modulos
     confirmar_modulos=${confirmar_modulos,,}
     [ -z "$confirmar_modulos" ] && confirmar_modulos="y"
 done
@@ -329,13 +329,13 @@ pip install "trytond==$version_tryton.*"
 pip install "proteus==$version_tryton.*"
 
 if [ "$confirmar_modulos" = "y" ]; then
-    echo "Instalando todos los módulos..."
+    echo "Descargando todos los módulos..."
     for module in $(curl -L -s https://downloads.tryton.org/"$version_tryton"/modules.txt); do
         echo "Instalando: $module"
         pip install "trytond_$module==$version_tryton.*"
     done
 else
-    echo "Instalando módulos básicos..."
+    echo "Descargando módulos básicos..."
     for module in $tryton_modules; do
         pip install "trytond_$module==$version_tryton.*"
     done
