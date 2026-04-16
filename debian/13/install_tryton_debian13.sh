@@ -637,19 +637,16 @@ echo ""
 echo "Servicios disponibles:"
 if [ "$confirmar_produccion" = "y" ]; then
     echo "- trytond-uwsgi (modo producción)"
-    
 else
     echo "- trytond (servidor principal)"
-
 fi
-
+echo "- trytond-cron    (tareas programadas)"
+echo "- trytond-worker  (procesamiento en segundo plano)"
+echo "###################################################"
 echo "  Configuración : $directorio_instalacion/config/"
 echo "  Logs          : $directorio_instalacion/log/"
 echo "  SAO Web       : $directorio_instalacion/sao/"
 echo "  Storage       : $directorio_instalacion/storage_db/"
-
-echo "- trytond-cron (tareas programadas)"
-echo "- trytond-worker (procesamiento en segundo plano)"
 echo ""
 echo "Logs: $directorio_instalacion/log/"
 echo "Configuración: $directorio_instalacion/config/"
