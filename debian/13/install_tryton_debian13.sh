@@ -161,7 +161,7 @@ confirmar_modulos=${confirmar_modulos,,}
 [ -z "$confirmar_modulos" ] && confirmar_modulos="y"
 
 while [[ "$confirmar_modulos" != "y" && "$confirmar_modulos" != "n" ]]; do
-    read -rp "Desea instalar todos los modulos (Y/n): " confirmar_modulos
+    read -rp "Desea descargar todos los modulos (Y/n): " confirmar_modulos
     confirmar_modulos=${confirmar_modulos,,}
     [ -z "$confirmar_modulos" ] && confirmar_modulos="y"
 done
@@ -331,13 +331,13 @@ pip install "proteus==$version_tryton.*"
 
 # Instalar módulos de Tryton
 if [ "$confirmar_modulos" = "y" ]; then
-    echo "Instalando todos los módulos..."
+    echo "Descargando todos los módulos..."
     for module in $(curl -L -s https://downloads.tryton.org/"$version_tryton"/modules.txt); do
         echo "Instalando: $module"
         pip install "trytond_$module==$version_tryton.*"
     done
 else
-    echo "Instalando módulos básicos..."
+    echo "Descargando módulos básicos..."
     for module in $tryton_modules; do
         pip install "trytond_$module==$version_tryton.*"
     done
@@ -651,6 +651,6 @@ echo "  Storage       : $directorio_instalacion/storage_db/"
 echo "- trytond-cron (tareas programadas)"
 echo "- trytond-worker (procesamiento en segundo plano)"
 echo ""
-echo "Logs: /var/log/tryton/"
+echo "Logs: $directorio_instalacion/log/"
 echo "Configuración: $directorio_instalacion/config/"
 echo ""
