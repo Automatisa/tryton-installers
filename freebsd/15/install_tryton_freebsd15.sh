@@ -395,26 +395,78 @@ chown "$user_sys":"$user_sys" "$directorio_instalacion"/log/*.log
 # Crear archivo de configuración
 echo -e "${BLUE}Creando archivo de configuración trytond.conf...${NC}"
 cat > "$directorio_instalacion"/config/trytond.conf << EOF
+
 [database]
+# URI de conexión a PostgreSQL (sin nombre de BD: trytond lo gestiona por BD activa)
 uri = postgresql://$user_bd:$pass_bd@$host_bd:$puerto_bd/
+# Directorio raíz del FileStore (adjuntos, avatares, informes almacenados en disco)
+# Ruta estándar del sistema, separada del directorio de la aplicación
+path = $directorio_instalacion/storage_db
+# almacenamiento de las imageens de lso avatares
+avatar_filestore = False
+avatar_prefix = avatar
+# Idioma principal para almacenamiento de traducciones en BD
 language = $codigo_pais
 
 [web]
+# Interfaz web (SAO y API JSON-RPC)
 listen = 0.0.0.0:$puerto_tryton_sao
 root = $directorio_instalacion/sao
 
-[attachment]
+[account_invoice]
+# Almacenar adjuntos en disco (FileStore) en lugar de en la BD
 filestore = False
-store_prefix = $nombre_bd
+# Prefijo de subdirectorio dentro del FileStore para los adjuntos
+store_prefix = invoices
+
+[account_statement]
+# Almacenar adjuntos en disco (FileStore) en lugar de en la BD 
+filestore = False
+# Prefijo de subdirectorio dentro del FileStore para los adjuntos
+store_prefix = account_statement
+
+[document_incoming]
+# Almacenar adjuntos en disco (FileStore) en lugar de en la BD 
+filestore = False
+# Prefijo de subdirectorio dentro del FileStore para los documentos del
+#modulo document_incoming
+store_prefix = document_incoming
+
+[attachment]
+# Almacenar adjuntos en disco (FileStore) en lugar de en la BD
+filestore = False
+# Prefijo de subdirectorio dentro del FileStore para los adjuntos
+store_prefix = attachment
 
 [session]
+# The time (in seconds) until an inactive session is considered invalid for
+# special internal tasks, thus requiring to re-confirm the session.
 timeout = 300
+# The time (in seconds) until a session expires.
 max_age = 86400
 
+# The maximal number of authentication attempts before the server answers
+# unconditionally 'Too Many Requests'.
+# The counting is done on all attempts over one period of timeout.
+#max_attempt = 5
+
 [password]
+# The minimal length required for user passwords.
+#length = 8
+
+# The ratio of non repeated characters for user passwords.
 entropy = 0.75
 
+# The time (in seconds) until a reset password expires.
+#reset_timeout = 86400   # (24h)
+
+# The path to the INI file to load as CryptContext:
+# <https://passlib.readthedocs.io/en/stable/narr/context-tutorial.html#loading-saving-a-cryptcontext>
+# If no path is set, Tryton will use the schemes bcrypt or pbkdf2_sha512.
+#passlib = None
+
 [queue]
+#Activate asynchronous processing of the tasks. Otherwise they are performed at the end of the requests
 worker = False
 clean_days = 30
 
@@ -423,8 +475,16 @@ clean_days = 120
 
 [email]
 uri = smtp://localhost:25
+# from = "Company Inc" <info@example.com>
 from = tryton@localhost
 retry = 5
+
+[product]
+# The number of decimals with which the unit prices are stored
+# in the database. The default value is 4.
+# Warning: This setting can not be lowered once a database is created.
+#price_decimal = 4
+
 EOF
 
 # Crear archivos de configuración de log
