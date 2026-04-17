@@ -371,7 +371,11 @@ cat > "$directorio_instalacion"/config/trytond.conf << EOF
 uri = postgresql://$user_bd:$pass_bd@$host_bd:$puerto_bd/
 # Directorio raíz del FileStore (adjuntos, avatares, informes almacenados en disco)
 # Ruta estándar del sistema, separada del directorio de la aplicación
-#path = $directorio_instalacion/storage_db
+path = $directorio_instalacion/storage_db
+
+# almacenamiento de las imageens de lso avatares
+avatar_filestore = False
+avatar_prefix = avatar
 
 # Idioma principal para almacenamiento de traducciones en BD
 language = $codigo_pais
@@ -380,12 +384,30 @@ language = $codigo_pais
 # Interfaz web (SAO y API JSON-RPC)
 listen = 0.0.0.0:$puerto_tryton_sao
 root = $directorio_instalacion/sao
-
-[attachment]
-# Almacenar adjuntos en disco (FileStore) en lugar de en la BD — recomendado
+[account_invoice]
+# Almacenar adjuntos en disco (FileStore) en lugar de en la BD
 filestore = False
 # Prefijo de subdirectorio dentro del FileStore para los adjuntos
-store_prefix = $nombre_bd
+store_prefix = invoices
+
+[account_statement]
+# Almacenar adjuntos en disco (FileStore) en lugar de en la BD 
+filestore = False
+# Prefijo de subdirectorio dentro del FileStore para los adjuntos
+store_prefix = account_statement
+
+[document_incoming]
+# Almacenar adjuntos en disco (FileStore) en lugar de en la BD 
+filestore = False
+# Prefijo de subdirectorio dentro del FileStore para los documentos del
+#modulo document_incoming
+store_prefix = document_incoming
+
+[attachment]
+# Almacenar adjuntos en disco (FileStore) en lugar de en la BD
+filestore = False
+# Prefijo de subdirectorio dentro del FileStore para los adjuntos
+store_prefix = attachment
 
 [session]
 # The time (in seconds) until an inactive session is considered invalid for
