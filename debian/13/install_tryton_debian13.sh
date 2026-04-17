@@ -383,7 +383,7 @@ root = $directorio_instalacion/sao
 
 [attachment]
 # Almacenar adjuntos en disco (FileStore) en lugar de en la BD — recomendado
-filestore = True
+filestore = False
 # Prefijo de subdirectorio dentro del FileStore para los adjuntos
 store_prefix = $nombre_bd
 
