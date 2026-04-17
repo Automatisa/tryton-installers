@@ -404,7 +404,7 @@ listen = 0.0.0.0:$puerto_tryton_sao
 root = $directorio_instalacion/sao
 
 [attachment]
-filestore = True
+filestore = False
 store_prefix = $nombre_bd
 
 [session]
