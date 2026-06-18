@@ -1,18 +1,15 @@
 #!/bin/sh
 # Script de instalación de Tryton con PostgreSQL en FreeBSD 15
-# Versión COMPLETA - Incluye SAO, npm y todas las funcionalidades
-#
+# Versión COMPLETA - Incluye SAO, npm, CA interna (ECDSA) y 4 servicios independientes
 
-
-
-# Colores para output
+# Colores para output (compatibles con printf en FreeBSD)
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Funciones
+# Funciones de control
 postgres_act() {
     if /usr/local/etc/rc.d/postgresql status >/dev/null 2>&1; then
         echo "true"
@@ -58,30 +55,28 @@ bank
 clear
 echo "#################################################"
 echo "########### INSTALACION DE TRYTON ###############"
-echo "###########     FREEBSD 15       ###############"
-echo "###########     COMPLETA          ###############"
+echo "###########      FREEBSD 15       ###############"
+echo "###########      COMPLETA         ###############"
 echo "#################################################"
 echo ""
 
 if [ "$(id -u)" != 0 ]; then
-    echo -e "${RED}Este script necesita ser ejecutado como superusuario${NC}"
+    printf "${RED}Este script necesita ser ejecutado como superusuario (root)${NC}\n"
     exit 1
 fi
 
-
-
 # Solicitar datos de configuración
-echo -e "${BLUE}--- CONFIGURACIÓN DEL SISTEMA ---${NC}"
+printf "${BLUE}--- CONFIGURACIÓN DEL SISTEMA ---${NC}\n"
 read -p "Usuario para el sistema: " user_sys
 user_sys=$(echo "$user_sys" | xargs)
 
 if [ "$user_sys" != '' ]; then
     if id "$user_sys" >/dev/null 2>&1; then
-        echo -e "${RED}Error: El usuario $user_sys ya existe${NC}"
+        printf "${RED}Error: El usuario $user_sys ya existe${NC}\n"
         exit 1
     fi
 else
-    echo -e "${RED}El usuario no puede estar en blanco${NC}"
+    printf "${RED}El usuario no puede estar en blanco${NC}\n"
     exit 1
 fi
 
@@ -94,7 +89,7 @@ if [ -z "$inst_postgres" ]; then
 fi
 
 while [ "$inst_postgres" != "y" ] && [ "$inst_postgres" != "n" ]; do
-    echo -e "${YELLOW}Opción no válida. Por favor, ingrese 'y' o 'n'.${NC}"
+    printf "${YELLOW}Opción no válida. Por favor, ingrese 'y' o 'n'.${NC}\n"
     read -p "Desea instalar postgresql en local (Y/n): " inst_postgres
     inst_postgres=$(echo "$inst_postgres" | tr '[:upper:]' '[:lower:]' | xargs)
     if [ -z "$inst_postgres" ]; then
@@ -113,7 +108,7 @@ if [ "$inst_postgres" = "y" ]; then
     pass_postgres=$(echo "$pass_postgres" | xargs)
 fi
 
-read -p "Version de tryton a instalar (ejemplo 7.0/7.8/8.0): " version_tryton
+read -p "Version de tryton a instalar (ejemplo 7.0/7.2): " version_tryton
 version_tryton=$(echo "$version_tryton" | xargs)
 
 read -p "Codigo pais (ejemplo: es): " codigo_pais
@@ -156,6 +151,14 @@ stty echo
 echo ""
 pass_bd=$(echo "$pass_bd" | xargs)
 
+
+read -p "Nombre host para ssl (defecto gestion.local): " hots_name_ssl
+hots_name_ssl=$(echo "$hots_name_ssl" | xargs)
+
+if [ -z "$hots_name_ssl" ]; then
+    hots_name_ssl="gestion.local"
+fi
+
 read -p "Desea instalar todos los modulos (Y/n): " confirmar_modulos
 confirmar_modulos=$(echo "$confirmar_modulos" | tr '[:upper:]' '[:lower:]' | xargs)
 [ -z "$confirmar_modulos" ] && confirmar_modulos="y"
@@ -193,6 +196,7 @@ echo "PUERTO XMLRPC DE TRYTON.................: $puerto_tryton_xml"
 echo "HOST DE LA BASE DE DATOS................: $host_bd"
 echo "USUARIO DE LA BASE DE DATOS.............: $user_bd"
 echo "USUARIO PARA EL SISTEMA.................: $user_sys"
+echo "NOMBRE HOST PARA SSL....................: $hots_name_ssl"
 echo "INSTALAR TODOS LOS MODULOS..............: $confirmar_modulos"
 echo "MODO PRODUCCION.........................: $confirmar_produccion"
 echo "#################################################"
@@ -202,94 +206,171 @@ confirmar=$(echo "$confirmar" | tr '[:upper:]' '[:lower:]' | xargs)
 [ -z "$confirmar" ] && confirmar="y"
 
 if [ "$confirmar" != "y" ]; then
-    echo -e "${RED}Proceso cancelado${NC}"
+    printf "${RED}Proceso cancelado${NC}\n"
     exit 1
 fi
 
-echo -e "${GREEN}Iniciando instalación...${NC}"
+printf "${GREEN}Iniciando instalación...${NC}\n"
 
-# Actualizar repositorios
-echo -e "${BLUE}=== Actualizando repositorios ===${NC}"
-pkg update -f
-
-
-echo -e "${BLUE}=== Instalando dependencias básicas ===${NC}"
+# Actualizar repositorios e instalar paquetes
+printf "${BLUE}=== Actualizando repositorios e instalando dependencias ===${NC}\n"
 pkg install -y curl wget git npm node20
 pkg install -y cups openldap26-client jpeg-turbo tiff libreoffice webfonts
-# ---------------------------------------------------------------------------
+pkg install -y python313 gcc gmake pkgconf rust libxml2 libxslt libffi libyaml
 
-# ---------------------------------------------------------------------------
-echo -e "${BLUE}=== Instalando Python y compiladores ===${NC}"
-pkg install -y python313 
-pkg install -y gcc gmake pkgconf git
-pkg install -y libxml2 libxslt libffi libyaml
+# Crear usuario con bash como shell
+pw useradd "$user_sys" -m -d "$directorio_instalacion" -s /usr/local/bin/bash 2>/dev/null || true
 
-
-# Crear directorios y usuario
-echo -e "${BLUE}=== Creando directorios y usuario ===${NC}"
-mkdir -p "$directorio_instalacion"
+# Crear estructura de directorios del sistema
+printf "${BLUE}=== Creando directorios funcionales ===${NC}\n"
 mkdir -p "$directorio_instalacion"/sao
 mkdir -p "$directorio_instalacion"/config
 mkdir -p "$directorio_instalacion"/log
 mkdir -p "$directorio_instalacion"/storage_db
+chmod 750 "$directorio_instalacion"/storage_db
 mkdir -p "$directorio_instalacion"/download
+# Creación de carpetas de la CA
+mkdir -p "$directorio_instalacion"/ca         
+mkdir -p "$directorio_instalacion"/ca/private 
+mkdir -p "$directorio_instalacion"/ca/certs   
+mkdir -p "$directorio_instalacion"/ca/csr     
+mkdir -p "$directorio_instalacion"/ca/servers 
+mkdir -p "$directorio_instalacion"/ca/clients 
+mkdir -p "$directorio_instalacion"/ca/scripts 
+mkdir -p "$directorio_instalacion"/ca/openssl 
+mkdir -p "$directorio_instalacion"/ca_publica 
 
-# ---------------------------------------------------------------------------
-# NOTA: bash está en /usr/local/bin/bash en FreeBSD; se usa como shell del
-# usuario para poder activar el venv con "source" más adelante.
-# ---------------------------------------------------------------------------
-pw useradd "$user_sys" -m -d "$directorio_instalacion" -s /usr/local/bin/bash 2>/dev/null || true
-chown -R "$user_sys":"$user_sys" "$directorio_instalacion"
+chmod 700 "$directorio_instalacion"/ca/private
 
- # ---------------------------------------------------------------------------
- # Instalar PostgreSQL
- # ---------------------------------------------------------------------------
+# Obtener IP local (Compatibilidad FreeBSD)
+IP_ADDR=$(ifconfig | grep 'inet ' | grep -v 127.0.0.1 | awk '{print $2}' | head -1)
+HOSTNAME_TRYTON="$hots_name_ssl"
 
+# Configuración de OpenSSL para Servidor y CA
+cat > "$directorio_instalacion"/ca/openssl/server.cnf << EOF
+[req]
+prompt = no
+default_md = sha256
+req_extensions = req_ext
+distinguished_name = dn
+
+[dn]
+C = ES
+ST = Madrid
+L = Madrid
+O = Tryton
+CN = ${HOSTNAME_TRYTON}
+
+[req_ext]
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = ${HOSTNAME_TRYTON}
+DNS.2 = localhost
+IP.1 = ${IP_ADDR}
+IP.2 = 127.0.0.1
+EOF
+
+cat > "$directorio_instalacion"/ca/openssl/ca.cnf << EOF
+[req]
+prompt = no
+default_md = sha256
+distinguished_name = dn
+x509_extensions = v3_ca
+
+[dn]
+C = ES
+ST = Madrid
+L = Madrid
+O = Tryton
+CN = Tryton Internal CA
+
+[v3_ca]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical, CA:true
+keyUsage = critical, digitalSignature, cRLSign, keyCertSign
+EOF
+
+# Generación Criptográfica de la CA y Certificados (ECDSA)
+if [ ! -f "$directorio_instalacion"/ca/private/myCA.key ]; then
+    printf "${BLUE}Creando CA privada de alta eficiencia (ECDSA)...${NC}\n"
+    openssl ecparam -name prime256v1 -genkey -noout -out "$directorio_instalacion"/ca/private/myCA.key
+    chmod 600 "$directorio_instalacion"/ca/private/myCA.key
+    openssl req -x509 -new -nodes -key "$directorio_instalacion"/ca/private/myCA.key -config "$directorio_instalacion"/ca/openssl/ca.cnf -days 3650 -out "$directorio_instalacion"/ca/certs/myCA.pem
+fi
+
+printf "${BLUE}Generando certificado SSL del servidor (ECDSA)...${NC}\n"
+openssl ecparam -name prime256v1 -genkey -noout -out "$directorio_instalacion"/ca/servers/tryton.key
+chmod 600 "$directorio_instalacion"/ca/servers/tryton.key
+openssl req -new -key "$directorio_instalacion"/ca/servers/tryton.key -out "$directorio_instalacion"/ca/csr/tryton.csr -config "$directorio_instalacion"/ca/openssl/server.cnf
+openssl x509 -req -in "$directorio_instalacion"/ca/csr/tryton.csr -CA "$directorio_instalacion"/ca/certs/myCA.pem -CAkey "$directorio_instalacion"/ca/private/myCA.key -CAcreateserial -out "$directorio_instalacion"/ca/servers/tryton.crt -days 1825 -sha256 -extensions req_ext -extfile "$directorio_instalacion"/ca/openssl/server.cnf
+chmod 644 "$directorio_instalacion"/ca/servers/tryton.crt
+
+# Escribir scripts auxiliares de la CA
+cat > "$directorio_instalacion"/ca/scripts/renew_server_cert.sh << 'EOF'
+#!/bin/sh
+BASE_DIR=$(cd "$(dirname "$0")/.." && pwd)
+openssl req -new -key "$BASE_DIR"/servers/tryton.key -out "$BASE_DIR"/csr/tryton.csr -config "$BASE_DIR"/openssl/server.cnf
+openssl x509 -req -in "$BASE_DIR"/csr/tryton.csr -CA "$BASE_DIR"/certs/myCA.pem -CAkey "$BASE_DIR"/private/myCA.key -CAcreateserial -out "$BASE_DIR"/servers/tryton.crt -days 1825 -sha256 -extensions req_ext -extfile "$BASE_DIR"/openssl/server.cnf
+EOF
+chmod +x "$directorio_instalacion"/ca/scripts/renew_server_cert.sh
+
+cat > "$directorio_instalacion"/ca/scripts/create_client_cert.sh << 'EOF'
+#!/bin/sh
+CLIENT_NAME=$1
+if [ -z "$CLIENT_NAME" ]; then echo "Uso: ./create_client_cert.sh nombre_cliente"; exit 1; fi
+BASE_DIR=$(cd "$(dirname "$0")/.." && pwd)
+mkdir -p "$BASE_DIR"/clients/$CLIENT_NAME
+cat > "$BASE_DIR"/clients/$CLIENT_NAME/client.cnf << EXT_EOF
+[req]
+prompt = no
+distinguished_name = dn
+req_extensions = client_ext
+[dn]
+C = ES; ST = Madrid; L = Madrid; O = Tryton; CN = $CLIENT_NAME
+[client_ext]
+keyUsage = critical, digitalSignature
+extendedKeyUsage = clientAuth
+subjectAltName = DNS:$CLIENT_NAME
+EXT_EOF
+openssl ecparam -name prime256v1 -genkey -noout -out "$BASE_DIR"/clients/$CLIENT_NAME/$CLIENT_NAME.key
+openssl req -new -key "$BASE_DIR"/clients/$CLIENT_NAME/$CLIENT_NAME.key -out "$BASE_DIR"/clients/$CLIENT_NAME/$CLIENT_NAME.csr -config "$BASE_DIR"/clients/$CLIENT_NAME/client.cnf
+openssl x509 -req -in "$BASE_DIR"/clients/$CLIENT_NAME/$CLIENT_NAME.csr -CA "$BASE_DIR"/certs/myCA.pem -CAkey "$BASE_DIR"/private/myCA.key -CAcreateserial -out "$BASE_DIR"/clients/$CLIENT_NAME/$CLIENT_NAME.crt -days 1825 -sha256 -extensions client_ext -extfile "$BASE_DIR"/clients/$CLIENT_NAME/client.cnf
+rm "$BASE_DIR"/clients/$CLIENT_NAME/client.cnf
+EOF
+chmod +x "$directorio_instalacion"/ca/scripts/create_client_cert.sh
+
+cp "$directorio_instalacion"/ca/certs/myCA.pem "$directorio_instalacion"/ca_publica/myCA.crt
+chmod 644 "$directorio_instalacion"/ca_publica/myCA.crt
+
+# Instalar y Configurar PostgreSQL Local con degradación requerida a md5
 if [ "$inst_postgres" = "y" ]; then
-    echo -e "${BLUE}=== Instalando PostgreSQL 16 ===${NC}"
+    printf "${BLUE}=== Instalando PostgreSQL 16 ===${NC}\n"
     pkg install -y postgresql16-server postgresql16-contrib
-
     sysrc postgresql_enable="YES"
-
-    echo -e "${BLUE}Inicializando PostgreSQL...${NC}"
     /usr/local/etc/rc.d/postgresql initdb
-
 
     PG_DATA="/var/db/postgres/data16"
     PG_CONF="$PG_DATA/postgresql.conf"
     PG_HBA="$PG_DATA/pg_hba.conf"
 
-    # Ajustar postgresql.conf (puerto y escucha) ANTES de arrancar
     if [ -f "$PG_CONF" ]; then
         cp "$PG_CONF" "$PG_CONF.bak"
         sed -i '' "s/#listen_addresses = 'localhost'/listen_addresses = '*'/g" "$PG_CONF"
         sed -i '' "s/#port = 5432/port = $puerto_bd/g" "$PG_CONF"
     fi
 
-
-
-    echo -e "${BLUE}Iniciando PostgreSQL (con trust local para configuración inicial)...${NC}"
     /usr/local/etc/rc.d/postgresql start
     sleep 5
 
-    if ! pgrep -x "postgres" > /dev/null; then
-        echo -e "${RED}Error: PostgreSQL no pudo iniciar${NC}"
-        echo -e "${YELLOW}Revisa el log: cat /var/db/postgres/data16/pg_log/*.log${NC}"
-        exit 1
-    fi
-
-    echo -e "${BLUE}Asignando contraseña al superusuario postgres (via socket/trust)...${NC}"
     su -m postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD '$pass_postgres';\""
-
-    echo -e "${BLUE}Creando usuario de aplicación y base de datos...${NC}"
-    su -m postgres -c "psql -c \"CREATE ROLE $user_bd WITH LOGIN SUPERUSER PASSWORD '$pass_bd';\"" 2>/dev/null || \
-    su -m postgres -c "psql -c \"ALTER USER $user_bd WITH PASSWORD '$pass_bd';\"" 2>/dev/null || true
-
+    su -m postgres -c "psql -c \"CREATE ROLE $user_bd WITH LOGIN SUPERUSER PASSWORD '$pass_bd';\"" 2>/dev/null || true
     su -m postgres -c "psql -c \"CREATE DATABASE $nombre_bd WITH OWNER $user_bd;\"" 2>/dev/null || true
-    su -m postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE $nombre_bd TO $user_bd;\"" 2>/dev/null || true
 
-    # Ahora sí: cambiar pg_hba.conf a md5 y recargar
-    echo -e "${BLUE}Aumentando seguridad en usuario md5...${NC}"
+    echo -e "${BLUE}Configurando autenticación md5 requerida...${NC}"
     if [ -f "$PG_HBA" ]; then
         cp "$PG_HBA" "$PG_HBA.bak"
         sed -i '' 's/trust$/md5/g'          "$PG_HBA"
@@ -297,105 +378,59 @@ if [ "$inst_postgres" = "y" ]; then
         sed -i '' 's/peer$/md5/g'           "$PG_HBA"
         sed -i '' 's/scram-sha-256/md5/g'   "$PG_HBA"
     fi
-
-    # Recargar configuración sin reiniciar
     su -m postgres -c "psql -c 'SELECT pg_reload_conf();'"
-
-    # Verificar conectividad con las nuevas credenciales
-    echo -e "${BLUE}Verificando conexión con md5...${NC}"
-    PGPASSWORD="$pass_postgres" psql -U postgres -h localhost -p "$puerto_bd" \
-        -c "SELECT version();" >/dev/null 2>&1 && \
-        echo -e "${GREEN}Conexión md5 verificada correctamente${NC}" || \
-        echo -e "${YELLOW}Advertencia: no se pudo verificar la conexión md5. Continúa el script.${NC}"
-
-    echo -e "${GREEN}PostgreSQL configurado correctamente${NC}"
 fi
 
-
-echo -e "${BLUE}=== Configurando entorno Python (venv) ===${NC}"
+# Configurando Entorno Virtual Python e Instalar Dependencias
+printf "${BLUE}=== Configurando venv Python e instalando Tryton ===${NC}\n"
 cd "$directorio_instalacion"
+su -m "$user_sys" -c "python3.13 -m venv ."
 
-su -m "$user_sys" -c "cd $directorio_instalacion && python3.13 -m venv ."
-
-# Helper para ejecutar comandos dentro del venv como $user_sys
-venv_run() {
-     su -m "$user_sys" -c "cd $directorio_instalacion && bin/pip $*"
+venv_pip() {
+    su "$user_sys" -c "$directorio_instalacion/bin/pip install $1"
 }
 
-echo -e "${BLUE}Instalando paquetes Python base...${NC}"
-venv_run "install --upgrade pip setuptools wheel"
+venv_pip "--upgrade pip setuptools wheel"
+venv_pip "werkzeug ldap3 python-stdnum simpleeval cached_property requests stripe csb43 pyyaml future ofxparse zeep PyPDF2 wrapt python-sql python-dateutil polib genshi relatorio passlib lxml schwifty"
+venv_pip "psycopg_pool bcrypt psycopg[c] uwsgi forex-python phonenumbers pygal qrcode[pil] email-validator"
+venv_pip "trytond==$version_tryton.* proteus==$version_tryton.*"
 
-venv_run "install werkzeug ldap3 python-stdnum simpleeval cached_property \
-    requests stripe csb43 pyyaml future ofxparse zeep PyPDF2 wrapt \
-    python-sql python-dateutil polib genshi relatorio passlib lxml"
-
-venv_run "install psycopg2-binary uwsgi forex-python phonenumbers pygal"
-
-
-echo -e "${BLUE}Instalando Tryton $version_tryton...${NC}"
-venv_run "install 'trytond==$version_tryton.*' 'proteus==$version_tryton.*'"
-
-# Instalar módulos de Tryton
+# Descarga e instalación de módulos
 if [ "$confirmar_modulos" = "y" ]; then
-    echo -e "${BLUE}Instalando todos los módulos disponibles...${NC}"
-    # ---------------------------------------------------------------------------
-    # CAMBIO: fetch en FreeBSD 15 escribe a stdout con -o -
-    # Si no hay modules.txt para esa versión, cae a la lista predefinida.
-    # ---------------------------------------------------------------------------
     MODULES_LIST=$(fetch -q -o - "https://downloads.tryton.org/$version_tryton/modules.txt" 2>/dev/null)
     if [ -n "$MODULES_LIST" ]; then
         for module in $MODULES_LIST; do
-            echo "  Instalando: trytond_$module"
-            venv_run "install 'trytond_$module==$version_tryton.*'" 2>/dev/null || true
+            venv_pip "trytond_$module==$version_tryton.*" 2>/dev/null || true
         done
     else
-        echo -e "${YELLOW}  No se encontró modules.txt. Usando lista predefinida...${NC}"
         for module in $tryton_modules; do
-            venv_run "install 'trytond_$module==$version_tryton.*'" 2>/dev/null || true
+            venv_pip "trytond_$module==$version_tryton.*" 2>/dev/null || true
         done
     fi
 else
-    echo -e "${BLUE}Instalando módulos básicos predefinidos...${NC}"
     for module in $tryton_modules; do
-        venv_run "install 'trytond_$module==$version_tryton.*'" 2>/dev/null || true
+        venv_pip "trytond_$module==$version_tryton.*" 2>/dev/null || true
     done
 fi
 
-# Instalar SAO (cliente web)
-echo -e "${BLUE}=== Instalando SAO web client ===${NC}"
+# Instalación de SAO (Cliente Web)
+printf "${BLUE}=== Instalando SAO web client ===${NC}\n"
 cd "$directorio_instalacion"/download
 fetch "https://downloads.tryton.org/$version_tryton/tryton-sao-last.tgz"
 if [ -f "tryton-sao-last.tgz" ]; then
     tar xzf tryton-sao-last.tgz
-    cd package
-    cp -r . "$directorio_instalacion"/sao/
+    cp -r package/. "$directorio_instalacion"/sao/
     cd "$directorio_instalacion"/sao
-    echo -e "${BLUE}Instalando dependencias de npm...${NC}"
-    # ---------------------------------------------------------------------------
-    # CAMBIO: node20 es compatible con --legacy-peer-deps; si falla, probar sin él
-    # ---------------------------------------------------------------------------
-    npm install --production --legacy-peer-deps 2>/dev/null || \
-    npm install --production 2>/dev/null || \
-    echo -e "${YELLOW}  npm install completado (posibles advertencias ignoradas)${NC}"
-else
-    echo -e "${YELLOW}  No se pudo descargar SAO. Continuando sin cliente web...${NC}"
+    npm install --production --legacy-peer-deps 2>/dev/null || true
 fi
 
-# Configurar permisos
-echo -e "${BLUE}Configurando permisos...${NC}"
-chown -R "$user_sys":"$user_sys" "$directorio_instalacion"/storage_db
-chmod 750 "$directorio_instalacion"/storage_db
-chown -R "$user_sys":"$user_sys" "$directorio_instalacion"/log
-chmod 750 "$directorio_instalacion"/log
+# Logs y Archivos de Configuración de Tryton
 touch "$directorio_instalacion"/log/tryton.log
 touch "$directorio_instalacion"/log/tryton-cron.log
 touch "$directorio_instalacion"/log/tryton-worker.log
 chown "$user_sys":"$user_sys" "$directorio_instalacion"/log/*.log
 
-# Crear archivo de configuración
-echo -e "${BLUE}Creando archivo de configuración trytond.conf...${NC}"
 cat > "$directorio_instalacion"/config/trytond.conf << EOF
-
 [database]
 # URI de conexión a PostgreSQL (sin nombre de BD: trytond lo gestiona por BD activa)
 uri = postgresql://$user_bd:$pass_bd@$host_bd:$puerto_bd/
@@ -485,106 +520,88 @@ retry = 5
 # Warning: This setting can not be lowered once a database is created.
 #price_decimal = 4
 
+[ssl]
+privatekey = $directorio_instalacion/ca/servers/tryton.key
+certificate = $directorio_instalacion/ca/servers/tryton.crt
 EOF
 
-# Crear archivos de configuración de log
+# Logs Rotativos
 for logtype in "" "-cron" "-worker"; do
     cat > "$directorio_instalacion"/config/trytond-log${logtype}.conf << EOF
 [formatters]
 keys=simple
-
 [handlers]
-keys=rotate,console
-
+keys=rotate
 [loggers]
 keys=root
-
 [formatter_simple]
 format=[%(asctime)s] %(levelname)s:%(name)s:%(message)s
-datefmt=%a %b %d %H:%M:%S %Y
-
 [handler_rotate]
 class=handlers.TimedRotatingFileHandler
 args=('$directorio_instalacion/log/tryton${logtype}.log', 'D', 1, 30)
 formatter=simple
-
-[handler_console]
-class=StreamHandler
-formatter=simple
-args=(sys.stdout,)
-
 [logger_root]
 level=INFO
-handlers=rotate,console
+handlers=rotate
 EOF
 done
 
-# Configurar uWSGI para producción
-if [ "$confirmar_produccion" = "y" ]; then
-    echo -e "${BLUE}Configurando uWSGI para modo producción...${NC}"
-    cat > "$directorio_instalacion"/config/uwsgi_trytond.conf << EOF
+# Configurar archivo uWSGI permanentemente
+cat > "$directorio_instalacion"/config/uwsgi_trytond.conf << EOF
 [uwsgi]
-http-socket=0.0.0.0:$puerto_tryton_sao
-master=true
-plugins=python3
-env=TRYTOND_CONFIG=$directorio_instalacion/config/trytond.conf
-env=TRYTOND_DATABASE_URI=postgresql://$user_bd:$pass_bd@$host_bd:$puerto_bd/$nombre_bd
-env=TRYTOND_LOGGING_CONFIG=$directorio_instalacion/config/trytond-log.conf
-wsgi=trytond.application:app
-processes=4
-threads=4
-virtualenv=$directorio_instalacion
-EOF
-fi
+#http-socket = 0.0.0.0:$puerto_tryton_sao
+https-socket = 0.0.0.0:8000,$directorio_instalacion/ca/servers/tryton.crt,$directorio_instalacion/ca/servers/tryton.key
+master = true
+env = TRYTOND_CONFIG=$directorio_instalacion/config/trytond.conf
+wsgi = trytond.application:app
+processes = 4
+threads = 2
+virtualenv = $directorio_instalacion
+die-on-term = true
 
-# Inicializar base de datos y módulos
-echo -e "${BLUE}Inicializando base de datos (puede tardar varios minutos)...${NC}"
-venv_run() {
-    su -m "$user_sys" -c "cd $directorio_instalacion && $*"
-}
-    venv_run "bin/trytond-admin \
-        -c $directorio_instalacion/config/trytond.conf \
-        -d $nombre_bd --all"
+EOF
+
+# Inicialización del Esquema Base de Datos de Tryton
+printf "${BLUE}Inicializando base de datos Tryton...${NC}\n"
+su "$user_sys" -c "$directorio_instalacion/bin/trytond-admin -c $directorio_instalacion/config/trytond.conf -d $nombre_bd --all"
 
 if [ $? -eq 0 ]; then
-    echo -e "${GREEN}Base de datos inicializada correctamente${NC}"
-
-    echo -e "${BLUE}Activando módulo de contabilidad...${NC}"
-    venv_run "bin/trytond-admin -u account --activate-dependencies \
-        -d $nombre_bd -c $directorio_instalacion/config/trytond.conf" 2>/dev/null || true
-
-    if [ "$codigo_pais" = "es" ]; then
-        echo -e "${BLUE}Activando módulo de contabilidad español...${NC}"
-        venv_run "bin/trytond-admin -u account_es --activate-dependencies \
-            -d $nombre_bd -c $directorio_instalacion/config/trytond.conf" 2>/dev/null || true
-    fi
-
-    if [ -f "$directorio_instalacion/bin/trytond_import_countries" ]; then
+    su "$user_sys" -c "$directorio_instalacion/bin/trytond-admin -u account --activate-dependencies -d $nombre_bd -c $directorio_instalacion/config/trytond.conf"
+ if [ -f "$directorio_instalacion/bin/trytond_import_countries" ]; then
         echo -e "${BLUE}Importando países...${NC}"
-        venv_run "bin/trytond_import_countries -d $nombre_bd \
+        su "$user_sys" -c "$directorio_instalacion/bin/trytond_import_countries -d $nombre_bd \
             -c $directorio_instalacion/config/trytond.conf"  || true
     fi
 
 
         if [ -f "$directorio_instalacion/bin/trytond_import_postal_codes" ]; then
         echo -e "${BLUE}Importando Codigos Postales...${NC}"
-        venv_run "bin/trytond_import_postal_codes -d $nombre_bd \
+        su "$user_sys" -c "$directorio_instalacion/bin/trytond_import_postal_codes -d $nombre_bd \
             -c $directorio_instalacion/config/trytond.conf es"  || true
     fi
 
     if [ -f "$directorio_instalacion/bin/trytond_import_currencies" ]; then
         echo -e "${BLUE}Importando monedas...${NC}"
-        venv_run "bin/trytond_import_currencies -d $nombre_bd \
+        su "$user_sys" -c "$directorio_instalacion/bin/trytond_import_currencies -d $nombre_bd \
             -c $directorio_instalacion/config/trytond.conf" 2>/dev/null || true
     fi
-else
-    echo -e "${RED}Error al inicializar la base de datos. Revisa los logs.${NC}"
 fi
 
+# Permisos Finales Unificados sobre la instalación
+chown -R "$user_sys":"$user_sys" "$directorio_instalacion"
 
-echo -e "${BLUE}Creando servicios rc.d...${NC}"
 
-# Servicio principal
+# ===========================================================================
+# CREACIÓN DE SERVICIOS INDEPENDIENTES (rc.d) EN FREEBSD
+# ===========================================================================
+printf "${BLUE}=== Generando scripts de servicios rc.d independientes ===${NC}\n"
+
+mkdir -p /var/run/tryton
+chown "$user_sys":"$user_sys" /var/run/tryton
+
+
+
+# 1. Servicio NATIVO (trytond)
 cat > /usr/local/etc/rc.d/trytond << EOF
 #!/bin/sh
 # PROVIDE: trytond
@@ -602,7 +619,7 @@ load_rc_config \$name
 : \${trytond_user:="$user_sys"}
 : \${trytond_home:="$directorio_instalacion"}
 
-pidfile="/var/run/trytond.pid"
+pidfile="/var/run/tryton/trytond.pid"
 
 start_cmd="trytond_start"
 stop_cmd="trytond_stop"
@@ -654,7 +671,7 @@ load_rc_config \$name
 : \${trytond_user:="$user_sys"}
 : \${trytond_home:="$directorio_instalacion"}
 
-pidfile="/var/run/trytond-cron.pid"
+pidfile="/var/run/tryton/trytond-cron.pid"
 
 start_cmd="trytond_cron_start"
 stop_cmd="trytond_cron_stop"
@@ -706,7 +723,7 @@ load_rc_config \$name
 : \${trytond_user:="$user_sys"}
 : \${trytond_home:="$directorio_instalacion"}
 
-pidfile="/var/run/trytond-worker.pid"
+pidfile="/var/run/tryton/trytond-worker.pid"
 
 start_cmd="trytond_worker_start"
 stop_cmd="trytond_worker_stop"
@@ -758,7 +775,7 @@ load_rc_config \$name
 : \${trytond_user:="$user_sys"}
 : \${trytond_home:="$directorio_instalacion"}
 
-pidfile="/var/run/trytond-uwsgi.pid"
+pidfile="/var/run/tryton/trytond-uwsgi.pid"
 
 start_cmd="trytond_uwsgi_start"
 stop_cmd="trytond_uwsgi_stop"
@@ -792,72 +809,34 @@ run_rc_command "\$1"
 EOF
 
 chmod +x /usr/local/etc/rc.d/trytond
+chmod +x /usr/local/etc/rc.d/trytond-uwsgi
 chmod +x /usr/local/etc/rc.d/trytond-cron
 chmod +x /usr/local/etc/rc.d/trytond-worker
-chmod +x /usr/local/etc/rc.d/trytond-uwsgi
 
-# Activar y arrancar servicios según modo
+
+# ===========================================================================
+# LÓGICA DE ACTIVACIÓN EXCLUSIVA BASADA EN LA SELECCIÓN DE PRODUCCIÓN
+# ===========================================================================
+sysrc trytond_cron_enable="YES"   # El planificador siempre corre
+sysrc trytond_worker_enable="YES" # El procesador de tareas en cola siempre corre
+
 if [ "$confirmar_produccion" = "y" ]; then
-    echo -e "${BLUE}Modo producción: arrancando con uWSGI...${NC}"
-
- 
+    printf "${GREEN}Modo Producción. Activando uWSGI y manteniendo Nativo deshabilitado.${NC}\n"
     sysrc trytond_uwsgi_enable="YES"
-    sysrc trytond_cron_enable="YES"
-    sysrc trytond_worker_enable="YES"
-    /usr/local/etc/rc.d/trytond-uwsgi start
-    /usr/local/etc/rc.d/trytond-cron start
-    /usr/local/etc/rc.d/trytond-worker start
+    sysrc trytond_enable="NO"
+    service trytond_uwsgi start
 else
+    printf "${YELLOW}Modo Desarrollo. Activando Servidor Nativo y manteniendo uWSGI deshabilitado.${NC}\n"
+    sysrc trytond_uwsgi_enable="NO"
     sysrc trytond_enable="YES"
-    sysrc trytond_cron_enable="YES"
-    sysrc trytond_worker_enable="YES"
-    /usr/local/etc/rc.d/trytond start
-    /usr/local/etc/rc.d/trytond-cron start
-    /usr/local/etc/rc.d/trytond-worker start
+    service trytond start
 fi
 
-# Configurar firewall pf
-if command -v pfctl >/dev/null 2>&1; then
-    echo -e "${BLUE}Configurando firewall pf...${NC}"
-    # Añadir reglas solo si no existen ya
-    grep -q "port $puerto_tryton_sao" /etc/pf.conf 2>/dev/null || \
-        echo "pass in proto tcp from any to any port $puerto_tryton_sao" >> /etc/pf.conf
-    grep -q "port $puerto_tryton_xml" /etc/pf.conf 2>/dev/null || \
-        echo "pass in proto tcp from any to any port $puerto_tryton_xml" >> /etc/pf.conf
-    pfctl -f /etc/pf.conf 2>/dev/null || true
-fi
-
-# Obtener IP
-IP_ADDR=$(ifconfig | grep -E 'inet [0-9]' | grep -v 127.0.0.1 | awk '{print $2}' | head -1)
-
-echo ""
-echo -e "${GREEN}#################################################${NC}"
-echo -e "${GREEN}########### INSTALACION COMPLETADA ##############${NC}"
-echo -e "${GREEN}#################################################${NC}"
-echo ""
-echo -e "${GREEN}Tryton ha sido instalado exitosamente${NC}"
-echo -e "${BLUE}URL de acceso SAO: http://${IP_ADDR:-localhost}:$puerto_tryton_sao${NC}"
-echo ""
-echo ""
-echo -e "${BLUE}Servicios disponibles:${NC}"
-if [ "$confirmar_produccion" = "y" ]; then
-    echo "  - trytond-uwsgi  (servidor producción)"
-else
-    echo "  - trytond        (servidor principal)"
-fi
-echo "  - trytond-cron   "
-echo "  - trytond-worker "
-echo ""
-echo -e "${BLUE}Directorios importantes:${NC}"
-echo "  Configuración : $directorio_instalacion/config/"
-echo "  Logs          : $directorio_instalacion/log/"
-echo "  SAO Web       : $directorio_instalacion/sao/"
-echo "  Storage       : $directorio_instalacion/storage_db/"
-echo ""
-echo -e "${BLUE}Comandos útiles:${NC}"
-echo "  service trytond status"
-echo "  service trytond restart"
-echo "  tail -f $directorio_instalacion/log/tryton.log"
-echo ""
 
 
+service trytond-cron start
+service trytond-worker start
+
+printf "${GREEN}=== INSTALACIÓN COMPLETADA EN FREEBSD 15 ===${NC}\n"
+printf "${YELLOW}Nota para el operario: Los 4 servicios funcionales fueron creados con éxito.${NC}\n"
+printf "${YELLOW}Puede administrarlos libremente usando 'service [nombre_servicio] [start|stop]'${NC}\n"
