@@ -6,7 +6,7 @@
 Scripts de instalación de Tryton ERP para varios sistemas operativos.
 - **Debian / systemd**
 - **Devuan / SysV init**
-- **Freebsd**
+- **Freebsd**  Actualizado para la version 8.0 con ssl
   
 Los scripts despliegan un servidor de Tryton ERP con su configuración lista para usar. Durante la ejecución, el script solicitará una serie de datos, como el usuario del sistema para Tryton ERP.
 
