@@ -179,6 +179,32 @@ while [ "$confirmar_produccion" != "y" ] && [ "$confirmar_produccion" != "n" ]; 
     [ -z "$confirmar_produccion" ] && confirmar_produccion="y"
 done
 
+
+# Tipo de despliegue en producción
+tipo_produccion=""
+
+if [ "$confirmar_produccion" = "y" ]; then
+    echo ""
+    echo "Seleccione el tipo de despliegue:"
+    echo "  1) Nginx + uWSGI"
+    echo "  2) Solo uWSGI"
+
+    while true; do
+        read -p "Opción (1/2): " tipo_produccion
+        tipo_produccion=$(echo "$tipo_produccion" | xargs)
+
+        case "$tipo_produccion" in
+            1|2)
+                break
+                ;;
+            *)
+                printf "${YELLOW}Opción no válida. Seleccione 1 o 2.${NC}\n"
+                ;;
+        esac
+    done
+fi
+
+
 # Mostrar resumen
 clear
 echo "#################################################"
@@ -546,20 +572,7 @@ handlers=rotate
 EOF
 done
 
-# Configurar archivo uWSGI permanentemente
-cat > "$directorio_instalacion"/config/uwsgi_trytond.conf << EOF
-[uwsgi]
-#http-socket = 0.0.0.0:$puerto_tryton_sao
-https-socket = 0.0.0.0:8000,$directorio_instalacion/ca/servers/tryton.crt,$directorio_instalacion/ca/servers/tryton.key
-master = true
-env = TRYTOND_CONFIG=$directorio_instalacion/config/trytond.conf
-wsgi = trytond.application:app
-processes = 4
-threads = 2
-virtualenv = $directorio_instalacion
-die-on-term = true
 
-EOF
 
 # Inicialización del Esquema Base de Datos de Tryton
 printf "${BLUE}Inicializando base de datos Tryton...${NC}\n"
@@ -821,10 +834,97 @@ sysrc trytond_cron_enable="YES"   # El planificador siempre corre
 sysrc trytond_worker_enable="YES" # El procesador de tareas en cola siempre corre
 
 if [ "$confirmar_produccion" = "y" ]; then
-    printf "${GREEN}Modo Producción. Activando uWSGI y manteniendo Nativo deshabilitado.${NC}\n"
-    sysrc trytond_uwsgi_enable="YES"
-    sysrc trytond_enable="NO"
-    service trytond_uwsgi start
+
+    case "$tipo_produccion" in
+        1)
+printf "${GREEN} Nginx + uWSGI.${NC}\n"
+pkg install -y nginx
+mkdir -p /usr/local/etc/nginx/sites-enabled
+
+if ! grep -q "sites-enabled/\*.conf" /usr/local/etc/nginx/nginx.conf; then
+    awk '
+    /^http[[:space:]]*{/ { inhttp=1 }
+    inhttp && /^}/ {
+        print "    include /usr/local/etc/nginx/sites-enabled/*.conf;"
+        inhttp=0
+    }
+    { print }
+    ' /usr/local/etc/nginx/nginx.conf > /tmp/nginx.conf
+
+    mv /tmp/nginx.conf /usr/local/etc/nginx/nginx.conf
+fi
+
+
+cat > "$directorio_instalacion"/config/uwsgi_trytond.conf << EOF
+[uwsgi]
+http-socket = 0.0.0.0:$puerto_tryton_sao
+master = true
+env = TRYTOND_CONFIG=$directorio_instalacion/config/trytond.conf
+wsgi = trytond.application:app
+processes = 4
+threads = 2
+virtualenv = $directorio_instalacion
+die-on-term = true
+
+EOF
+
+cat >/usr/local/etc/nginx/sites-enabled/tryton_site.conf << EOF
+server {
+  listen 443 ssl ;
+  listen [::]:443 ssl ;
+
+  server_name "$IP_ADDR";
+  ssl_certificate $directorio_instalacion/ca/servers/tryton.crt;
+  ssl_certificate_key $directorio_instalacion/ca/servers/tryton.key;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_prefer_server_ciphers on;
+  ssl_verify_client optional_no_ca;
+
+  location / {
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_pass http://127.0.0.1:8000;
+  }
+}
+
+server {
+  listen 80;
+  listen [::]:80;
+
+  server_name example.tryton.org;
+  return 301 https://0.0.0.0$request_uri;
+}
+
+EOF
+sysrc nginx_enable="YES"
+sysrc trytond_uwsgi_enable="YES"
+sysrc trytond_enable="NO"
+service trytond-uwsgi start
+service nginx start
+            ;;
+        2)
+             printf "${GREEN} Solo uWSGI con SSL.${NC}\n"
+            
+cat > "$directorio_instalacion"/config/uwsgi_trytond.conf << EOF
+[uwsgi]
+#http-socket = 0.0.0.0:$puerto_tryton_sao
+https-socket = 0.0.0.0:8000,$directorio_instalacion/ca/servers/tryton.crt,$directorio_instalacion/ca/servers/tryton.key
+master = true
+env = TRYTOND_CONFIG=$directorio_instalacion/config/trytond.conf
+wsgi = trytond.application:app
+processes = 4
+threads = 2
+virtualenv = $directorio_instalacion
+die-on-term = true
+
+EOF
+sysrc trytond_uwsgi_enable="YES"
+sysrc trytond_enable="NO"
+service trytond_uwsgi start
+    
+            ;;
+
+esac
 else
     printf "${YELLOW}Modo Desarrollo. Activando Servidor Nativo y manteniendo uWSGI deshabilitado.${NC}\n"
     sysrc trytond_uwsgi_enable="NO"
