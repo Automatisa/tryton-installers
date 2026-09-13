@@ -242,7 +242,7 @@ printf "${GREEN}Iniciando instalación...${NC}\n"
 printf "${BLUE}=== Actualizando repositorios e instalando dependencias ===${NC}\n"
 pkg install -y curl wget git npm node20
 pkg install -y cups openldap26-client jpeg-turbo tiff libreoffice webfonts
-pkg install -y python313 gcc gmake pkgconf rust libxml2 libxslt libffi libyaml
+pkg install -y python313 gcc gmake pkgconf rust libargon2 libxml2 libxslt libffi libyaml
 
 # Crear usuario con bash como shell
 pw useradd "$user_sys" -m -d "$directorio_instalacion" -s /usr/local/bin/bash 2>/dev/null || true
@@ -417,6 +417,8 @@ venv_pip() {
 }
 
 venv_pip "--upgrade pip setuptools wheel"
+venv_pip "cffi"
+venv_pip "argon2-cffi==25.1.0 argon2-cffi-bindings==25.1.0"
 venv_pip "werkzeug ldap3 python-stdnum simpleeval cached_property requests stripe csb43 pyyaml future ofxparse zeep PyPDF2 wrapt python-sql python-dateutil polib genshi relatorio passlib lxml schwifty"
 venv_pip "psycopg_pool bcrypt psycopg[c] uwsgi forex-python phonenumbers pygal qrcode[pil] email-validator"
 venv_pip "trytond==$version_tryton.* proteus==$version_tryton.*"
